@@ -1,0 +1,6 @@
+{
+  "graphs": {
+    "posts_build": "./src/graph/factory.ts:graph"
+  },
+  "env": ".env"
+}

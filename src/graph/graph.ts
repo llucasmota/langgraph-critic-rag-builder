@@ -1,0 +1,60 @@
+import { StateGraph, START, END } from "@langchain/langgraph";
+import { z } from "zod/v3";
+import { OpenRouterService } from '../services/openrouterService.ts';
+
+import { createOrchestratorNode } from './nodes/orchestratorNode.ts';
+import { createFlutterNode } from './nodes/flutterNode.ts';
+import { createReviewerNode } from './nodes/reviewerNode.ts';
+import { createImageExtractorNode } from './nodes/imageExtractorNode.ts';
+import { routeToSpecialist, routeAfterReview } from './nodes/edgeConditions.ts';
+import { createNodeReactNode } from "./nodes/nodeJsReactNode.ts";
+import { createAiNode } from "./nodes/aiNode.ts";
+
+export const PostStateAnnotation = z.object({
+  initialCommand: z.string(),
+  niche: z.enum(["flutter_dart", "node_react", "ai_engineering", "out_of_scope"]).optional(),
+  suggestedFolderSlug: z.string().optional(),
+  reviewerSearchQuery: z.string().optional(),
+  ragContext: z.string().optional(),
+  mcpContext: z.string().optional(),
+  technicalDraft: z.string().optional(),
+  codeSnippets: z.array(z.string()).optional(),
+  reviewFeedback: z.string().optional(),
+  finalPostText: z.string().optional(),
+  hashtags: z.array(z.string()).optional(),
+  reviewCount: z.number().default(0),
+});
+
+export type GraphState = z.infer<typeof PostStateAnnotation>;
+
+export function buildPostGraph(llmClient: OpenRouterService) {
+  const graph = new StateGraph(PostStateAnnotation)
+    .addNode('orchestrator', createOrchestratorNode(llmClient))
+    .addNode('flutterSpecialist', createFlutterNode(llmClient))
+    .addNode('nodeReactSpecialist', createNodeReactNode(llmClient))
+    .addNode('aiSpecialist', createAiNode(llmClient))
+    .addNode('reviewer', createReviewerNode(llmClient))
+    .addNode('imageExtractor', createImageExtractorNode())
+
+    .addEdge(START, 'orchestrator')
+    .addConditionalEdges('orchestrator', routeToSpecialist, {
+      flutterSpecialist: 'flutterSpecialist',
+      nodeReactSpecialist: 'nodeReactSpecialist',
+      aiSpecialist: 'aiSpecialist',
+      imageExtractor: 'imageExtractor',
+    })
+
+    .addEdge('flutterSpecialist', 'reviewer')
+    .addEdge('nodeReactSpecialist', 'reviewer')
+    .addEdge('aiSpecialist', 'reviewer')
+
+    .addConditionalEdges('reviewer', routeAfterReview, {
+      imageExtractor: 'imageExtractor',
+      flutterSpecialist: 'flutterSpecialist',
+      nodeReactSpecialist: 'nodeReactSpecialist',
+      aiSpecialist: 'aiSpecialist',
+    })
+    .addEdge('imageExtractor', END);
+
+  return graph.compile();
+}
