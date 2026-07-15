@@ -4,6 +4,56 @@ import { RagService } from '../../services/ragService.ts';
 import type { GraphState } from '../graph.ts';
 import { SpecialistOutputSchema } from './schemas.ts';
 
+/**
+ * Extracts all HTTP/HTTPS URLs from a given text string.
+ */
+function extractUrls(text: string): string[] {
+  const urlRegex = /https?:\/\/[^\s"')]+/g;
+  return text.match(urlRegex) ?? [];
+}
+
+/**
+ * Fetches the text content of a URL, stripping HTML tags.
+ * Returns null if the fetch fails or the content is too short to be meaningful.
+ */
+async function fetchUrlContent(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000); // 10s hard timeout
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ContentBuilder/1.0)' },
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.warn(`[URL Fetch] HTTP ${response.status} for: ${url}`);
+      return null;
+    }
+
+    const html = await response.text();
+    // Strip scripts, styles, and all HTML tags for clean text extraction
+    const text = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s{3,}/g, '\n\n')
+      .trim();
+
+    // Only return if the content is meaningful; cap at 12K chars to stay within token budget
+    return text.length > 200 ? text.substring(0, 12_000) : null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[URL Fetch] Failed to fetch ${url}: ${message}`);
+    return null;
+  }
+}
+
 export function createNodeReactNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
     console.log("[Node/React Specialist] Collecting RAG and generating draft...");
@@ -19,6 +69,30 @@ export function createNodeReactNode(llmClient: OpenRouterService) {
       }
     }
 
+    // --- Live URL Content Extraction ---
+    // Detect any URLs in the user's command and fetch them as live ground-truth data.
+    // This prevents the model from hallucinating about topics it may not know from training.
+    const urls = extractUrls(state.initialCommand);
+    let webData = '';
+    if (urls.length > 0) {
+      console.log(`[URL Extractor] Found ${urls.length} URL(s) in command. Fetching live content...`);
+      const fetchResults = await Promise.allSettled(urls.map(url => fetchUrlContent(url)));
+      const fetchedContents: string[] = [];
+
+      fetchResults.forEach((result, idx) => {
+        if (result.status === 'fulfilled' && result.value) {
+          console.log(`[URL Extractor] ✅ Fetched: ${urls[idx]}`);
+          fetchedContents.push(`[Source: ${urls[idx]}]\n${result.value}`);
+        } else {
+          console.warn(`[URL Extractor] ❌ Could not fetch: ${urls[idx]}`);
+        }
+      });
+
+      if (fetchedContents.length > 0) {
+        webData = fetchedContents.join('\n\n---\n\n');
+      }
+    }
+
     const systemPrompt = `You are a Senior Full Stack Software Engineer specializing in the JavaScript and TypeScript ecosystem (Node.js, React, Next.js).
 Persona: Pragmatic, highly technical executor with over 6 years of experience. You care about strict typing, automated testing, clean architecture, and how things work under the hood (e.g., the Node Event Loop, React render cycles).
 PROHIBITED: Never use "Tech Lead" or management titles. Avoid hype words.
@@ -27,17 +101,59 @@ Task: Write a deep, technical draft in professional US English.
 Code Separation: DO NOT output raw code blocks in the text. Replace code with [CODE_SNIPPET_X] in the text, and put the raw, compilable TS/JS code in the 'codeSnippets' array.
 
 STRICT GROUNDING & ANTI-HALLUCINATION:
-1. Ground your knowledge in the provided [RAG Data]. Do not make up versions of packages, libraries, or frameworks.
-2. If you refer to a specific version of a library/tool (e.g. React 19, Next.js 15), you must be absolutely certain that is the correct version. If you are unsure, do not state a specific version number; instead, use safe general phrasing (e.g., 'In recent versions of React...').
-3. Never invent APIs, methods, or parameters.
-4. All code snippets in 'codeSnippets' must be complete, syntactically valid TypeScript/JavaScript code. Do not use ellipses (...) or placeholders like '// ... perform logic' inside code blocks unless it is inside a comments block that explains the context. The code must be clean, readable, and directly copy-pasteable.`;
+1. Ground your knowledge in the provided data sources ([WEB_DATA], [RAG Data]). These override your internal training data.
+2. Never invent APIs, methods, library versions, or parameters. If uncertain about a version number, use general phrasing (e.g., "In recent versions of React...") instead of guessing.
+3. All code snippets in 'codeSnippets' must be complete, syntactically valid TypeScript/JavaScript. Do not use unresolved ellipses (...) or undefined placeholders inside code blocks. Code must be clean, readable, and directly copy-pasteable.
 
+KNOWLEDGE CUTOFF AWARENESS (CRITICAL):
+4. Your training data has a cutoff date. You may be unaware of recent releases, announcements, or ecosystem changes. NEVER assume something does not exist just because you have no knowledge of it.
+5. If [WEB_DATA] is present, it contains LIVE content fetched from URLs the user provided. This data is absolute ground truth. Base the post primarily on [WEB_DATA] and make this explicit: reference what the source says rather than speculating.
+6. If [WEB_DATA] contradicts your internal knowledge (e.g., a version or feature exists that you thought didn't), ALWAYS trust [WEB_DATA]. Clearly attribute claims to the source: e.g., "According to the official TypeScript 7.0 announcement...".
+7. If no [WEB_DATA] is available and the topic involves a recent release or announcement you cannot confidently confirm from training, explicitly write in the draft: "[FACT-CHECK REQUIRED: This information is based on training data and may be outdated. Please verify against the official source.]"
+
+VERBATIM CITATION FOR TECHNICAL SPECIFICS (CRITICAL):
+8. For CLI flag names (e.g., --checkers, --build), package names (e.g., @typescript/typescript6), installation commands, and hyperlinks/URLs: copy them VERBATIM from [WEB_DATA]. Never paraphrase, rename, or invent them. If the exact name or URL is not explicitly present in [WEB_DATA], DO NOT include it — use general phrasing instead (e.g., "via experimental parallelism flags" instead of inventing flag names).
+9. For benchmark numbers (e.g., 11.9x, 125.7s → 10.6s): cite only numbers that appear explicitly in [WEB_DATA]. Do not round, interpolate, or extrapolate values. If a number is not in the source, omit it or use a range (e.g., "8x–12x faster").
+10. If [WEB_DATA] content appears noisy, truncated, or HTML-heavy (e.g., contains navigation menus, cookie notices, or repeated boilerplate), extract only the article body paragraphs. If you cannot confidently identify what the source claims about a specific technical detail, omit that detail rather than guessing.`;
+
+    // [WEB_DATA] is placed FIRST in the user prompt to signal highest priority to the model.
     let userPrompt = `Topic:\n"${state.initialCommand}"\n\n`;
+    if (webData) {
+      userPrompt += `[WEB_DATA] (live content fetched from URLs in the command — treat as absolute ground truth, prioritize over all other sources):\n${webData}\n\n`;
+    }
     if (ragContext) userPrompt += `[RAG Data]:\n${ragContext}\n\n`;
     if (state.mcpContext) userPrompt += `[MCP Data]:\n${state.mcpContext}\n\n`;
 
     if (state.reviewCount > 0 && state.reviewFeedback) {
-      userPrompt += `[REVIEW FEEDBACK - FIX THIS]:\n"${state.reviewFeedback}"\n\n`;
+      const hasSurgical = state.approvedContent || (state.corrections && state.corrections.length > 0);
+
+      if (hasSurgical) {
+        // SURGICAL MODE: only fix what the reviewer flagged — preserve everything else.
+        userPrompt += `[SURGICAL CORRECTION MODE — Attempt ${state.reviewCount + 1}]:
+The reviewer has identified SPECIFIC errors in the previous draft. Your task is to:
+1. Preserve ALL of the [APPROVED CONTENT] below VERBATIM — do not alter a single word, punctuation mark, or line break.
+2. Apply ONLY the corrections listed in [CORRECTIONS NEEDED] — nothing more.
+3. Reassemble the final complete draft by integrating the corrections into the approved content.
+4. Do NOT introduce any new claims, examples, or code snippets beyond what is in the approved content + corrections.
+
+[APPROVED CONTENT — COPY VERBATIM, NO CHANGES]:
+${state.approvedContent || '(none — the reviewer did not identify any fully correct sections)'}
+
+[CORRECTIONS NEEDED — APPLY THESE SURGICAL FIXES]:
+${state.corrections && state.corrections.length > 0
+  ? state.corrections.map((c, i) =>
+    `Fix #${i + 1}:\n  - ORIGINAL (wrong): "${c.originalText}"\n  - ISSUE: ${c.issue}\n  - REPLACE WITH: ${c.suggestedReplacement || '(delete this claim entirely)'}`
+  ).join('\n\n')
+  : '(no specific corrections listed — use the general feedback below)'}
+
+[GENERAL FEEDBACK FOR CONTEXT]:
+"${state.reviewFeedback}"
+
+`;
+      } else {
+        // FULL-REWRITE MODE: reviewer provided no surgical data — regenerate from scratch.
+        userPrompt += `[REVIEW FEEDBACK — FULL REWRITE NEEDED]:\n"${state.reviewFeedback}"\n\n`;
+      }
     }
 
     const result = await llmClient.generateStructured(systemPrompt, userPrompt, SpecialistOutputSchema);
@@ -46,6 +162,7 @@ STRICT GROUNDING & ANTI-HALLUCINATION:
 
     return {
       ragContext: ragContext,
+      webData: webData || undefined,  // Persist so the Reviewer can validate claims against the source
       technicalDraft: result.data.technicalDraft,
       codeSnippets: result.data.codeSnippets,
     };
