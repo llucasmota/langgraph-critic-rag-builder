@@ -16,10 +16,18 @@ export const PostStateAnnotation = z.object({
   suggestedFolderSlug: z.string().optional(),
   reviewerSearchQuery: z.string().optional(),
   ragContext: z.string().optional(),
+  webData: z.string().optional(),        // Live content fetched from URLs in the user command
   mcpContext: z.string().optional(),
   technicalDraft: z.string().optional(),
   codeSnippets: z.array(z.string()).optional(),
   reviewFeedback: z.string().optional(),
+  // Surgical correction fields — populated by the Reviewer on rejection
+  approvedContent: z.string().optional(),     // Verbatim correct sections to preserve
+  corrections: z.array(z.object({             // Structured list of wrong claims + fixes
+    originalText: z.string(),
+    issue: z.string(),
+    suggestedReplacement: z.string(),
+  })).optional(),
   finalPostText: z.string().optional(),
   hashtags: z.array(z.string()).optional(),
   reviewCount: z.number().default(0),
