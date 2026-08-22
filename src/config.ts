@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 export type ModelConfig = {
   apiKey: string;
   httpReferer: string;
@@ -19,6 +21,14 @@ export type ModelConfig = {
 };
 
 console.assert(process.env.OPENROUTER_API_KEY, 'OPENROUTER_API_KEY is not set in environment variables');
+
+export const prompts = {
+  aiEngineer: readFileSync('./prompts/v1/aiEngineer.txt'),
+  nodeJsReact: readFileSync('./prompts/v1/nodeJsReact.txt'),
+  orchestrator: readFileSync('./prompts/v1/orchestrator.txt'),
+  promptOptimizer: readFileSync('./prompts/v1/promptOptimizer.txt'),
+  reviewer: readFileSync('./prompts/v1/reviewer.txt'),
+}
 
 export const config: ModelConfig = {
   apiKey: process.env.OPENROUTER_API_KEY!,
