@@ -6,6 +6,13 @@ export const OrchestratorOutputSchema = z.object({
   suggestedFolderSlug: z.string().describe("A very short, succinct folder name (slug) in lowercase with hyphens, representing the topic in max 20 characters. E.g., 'flutter-mediaquery' or 'node-di' or 'ai-agents'."),
 });
 
+export const PromptOptimizerOutputSchema = z.object({
+  optimizedCommand: z.string().describe("The cleaned, harmonized, and contradiction-free version of the user prompt for content generation. Must preserve all URLs, intent, tone, audience, and [CODE_SNIPPET_X] placeholders."),
+  detectedIssues: z.array(z.string()).describe("List of contradictions, duplicates, or quality issues detected in the raw prompt that were fixed."),
+  summary: z.string().describe("A concise 1-sentence summary of the optimization performed."),
+});
+
+
 export const SpecialistOutputSchema = z.object({
   technicalDraft: z.string().describe("The deep, pragmatic technical text in US English. Insert placeholders like [CODE_SNIPPET_1] ONLY if code is required/generated. Otherwise, write a text-only draft without code placeholders."),
   codeSnippets: z.array(z.string()).describe("An array containing raw, compilable code snippets if code is needed. Set to an empty array [] if the post is conceptual/text-only."),

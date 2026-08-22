@@ -1,7 +1,8 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { z } from "zod/v3";
-import { OpenRouterService } from '../services/openrouterService.ts';
+import type { ILlmService } from '../services/llmService.ts';
 
+import { createPromptOptimizerNode } from './nodes/promptOptimizerNode.ts';
 import { createOrchestratorNode } from './nodes/orchestratorNode.ts';
 import { createFlutterNode } from './nodes/flutterNode.ts';
 import { createReviewerNode } from './nodes/reviewerNode.ts';
@@ -12,6 +13,8 @@ import { createAiNode } from "./nodes/aiNode.ts";
 
 export const PostStateAnnotation = z.object({
   initialCommand: z.string(),
+  optimizedCommand: z.string().optional(),
+  promptOptimizationSummary: z.string().optional(),
   niche: z.enum(["flutter_dart", "node_react", "ai_engineering", "out_of_scope"]).optional(),
   suggestedFolderSlug: z.string().optional(),
   reviewerSearchQuery: z.string().optional(),
@@ -35,8 +38,9 @@ export const PostStateAnnotation = z.object({
 
 export type GraphState = z.infer<typeof PostStateAnnotation>;
 
-export function buildPostGraph(llmClient: OpenRouterService) {
+export function buildPostGraph(llmClient: ILlmService) {
   const graph = new StateGraph(PostStateAnnotation)
+    .addNode('promptOptimizer', createPromptOptimizerNode(llmClient))
     .addNode('orchestrator', createOrchestratorNode(llmClient))
     .addNode('flutterSpecialist', createFlutterNode(llmClient))
     .addNode('nodeReactSpecialist', createNodeReactNode(llmClient))
@@ -44,7 +48,8 @@ export function buildPostGraph(llmClient: OpenRouterService) {
     .addNode('reviewer', createReviewerNode(llmClient))
     .addNode('imageExtractor', createImageExtractorNode())
 
-    .addEdge(START, 'orchestrator')
+    .addEdge(START, 'promptOptimizer')
+    .addEdge('promptOptimizer', 'orchestrator')
     .addConditionalEdges('orchestrator', routeToSpecialist, {
       flutterSpecialist: 'flutterSpecialist',
       nodeReactSpecialist: 'nodeReactSpecialist',

@@ -1,12 +1,11 @@
-
 import { buildPostGraph } from './graph/graph.ts';
-import { OpenRouterService } from './services/openrouterService.ts';
+import { createLlmService } from './services/llmProvider.ts';
 
 async function main() {
   const args = process.argv.slice(2);
   const command = args.length > 0 ? args.join(" ") : "Explain dependency injection in Flutter using Widgetbook";
 
-  const llmClient = new OpenRouterService();
+  const llmClient = createLlmService();
   const graph = buildPostGraph(llmClient);
 
   console.log(`🚀 Starting Agentic Workflow for LinkedIn...`);

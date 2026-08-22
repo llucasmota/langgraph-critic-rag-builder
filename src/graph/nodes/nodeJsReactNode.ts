@@ -1,17 +1,18 @@
 import type { Runtime } from '@langchain/langgraph';
-import { OpenRouterService } from '../../services/openrouterService.ts';
+import type { ILlmService } from '../../services/llmService.ts';
 import { RagService } from '../../services/ragService.ts';
 import type { GraphState } from '../graph.ts';
 import { SpecialistOutputSchema } from './schemas.ts';
 import { extractUrls, fetchUrlContent } from '../../services/webContentService.ts';
 
 
-export function createNodeReactNode(llmClient: OpenRouterService) {
+export function createNodeReactNode(llmClient: ILlmService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
     console.log("[Node/React Specialist] Collecting RAG and generating draft...");
 
+    const effectiveCommand = state.optimizedCommand || state.initialCommand;
     const ragService = new RagService();
-    let ragContext = await ragService.retrieveContext(state.initialCommand, "node_react");
+    let ragContext = await ragService.retrieveContext(effectiveCommand, "node_react");
 
     if (state.reviewCount > 0 && state.reviewerSearchQuery) {
       console.log(`[Iterative RAG] Searching Pinecone context for: "${state.reviewerSearchQuery}"...`);
@@ -24,7 +25,7 @@ export function createNodeReactNode(llmClient: OpenRouterService) {
     // --- Live URL Content Extraction ---
     // Detect any URLs in the user's command and fetch them as live ground-truth data.
     // This prevents the model from hallucinating about topics it may not know from training.
-    const urls = extractUrls(state.initialCommand);
+    const urls = extractUrls(effectiveCommand);
     let webData = '';
     if (urls.length > 0) {
       console.log(`[URL Extractor] Found ${urls.length} URL(s) in command. Fetching live content...`);
@@ -60,22 +61,23 @@ CODE & IMAGE INFERENCE (CRITICAL):
 
 STRICT GROUNDING & ANTI-HALLUCINATION:
 1. Ground your knowledge in the provided data sources ([WEB_DATA], [RAG Data]). These override your internal training data.
-2. Never invent APIs, methods, library versions, or parameters. If uncertain about a version number, use general phrasing (e.g., "In recent versions of React...") instead of guessing.
-3. All code snippets in 'codeSnippets' must be complete, syntactically valid TypeScript/JavaScript. Do not use unresolved ellipses (...) or undefined placeholders inside code blocks. Code must be clean, readable, and directly copy-pasteable.
+2. Never invent APIs, synthetic classes/adapters, library versions, or CLI flags. If uncertain about a version number, use general phrasing (e.g., "In recent versions of React...") instead of guessing.
+3. EXTERNAL PLATFORM SANITY: NEVER invent or extrapolate version numbers for external runtimes, tools, or OS versions (e.g. Node 99, TypeScript 20).
+4. All code snippets in 'codeSnippets' must be complete, syntactically valid TypeScript/JavaScript. Do not use unresolved ellipses (...) or undefined placeholders inside code blocks. Code must be clean, readable, and directly copy-pasteable.
 
 KNOWLEDGE CUTOFF AWARENESS (CRITICAL):
-4. Your training data has a cutoff date. You may be unaware of recent releases, announcements, or ecosystem changes. NEVER assume something does not exist just because you have no knowledge of it.
-5. If [WEB_DATA] is present, it contains LIVE content fetched from URLs the user provided. This data is absolute ground truth. Base the post primarily on [WEB_DATA] and make this explicit: reference what the source says rather than speculating.
-6. If [WEB_DATA] contradicts your internal knowledge (e.g., a version or feature exists that you thought didn't), ALWAYS trust [WEB_DATA]. Clearly attribute claims to the source: e.g., "According to the official TypeScript 7.0 announcement...".
-7. If no [WEB_DATA] is available and the topic involves a recent release or announcement you cannot confidently confirm from training, explicitly write in the draft: "[FACT-CHECK REQUIRED: This information is based on training data and may be outdated. Please verify against the official source.]"
+5. Your training data has a cutoff date. You may be unaware of recent releases, announcements, or ecosystem changes. NEVER assume something does not exist just because you have no knowledge of it.
+6. If [WEB_DATA] is present, it contains LIVE content fetched from URLs the user provided. This data is absolute ground truth. Base the post primarily on [WEB_DATA] and make this explicit: reference what the source says rather than speculating.
+7. If [WEB_DATA] contradicts your internal knowledge (e.g., a version or feature exists that you thought didn't), ALWAYS trust [WEB_DATA]. Clearly attribute claims to the source: e.g., "According to the official TypeScript announcement...".
+8. If no [WEB_DATA] is available and the topic involves a recent release or announcement you cannot confidently confirm from training, explicitly write in the draft: "[FACT-CHECK REQUIRED: This information is based on training data and may be outdated. Please verify against the official source.]"
 
 VERBATIM CITATION FOR TECHNICAL SPECIFICS (CRITICAL):
-8. For CLI flag names (e.g., --checkers, --build), package names (e.g., @typescript/typescript6), installation commands, and hyperlinks/URLs: copy them VERBATIM from [WEB_DATA]. Never paraphrase, rename, or invent them. If the exact name or URL is not explicitly present in [WEB_DATA], DO NOT include it — use general phrasing instead (e.g., "via experimental parallelism flags" instead of inventing flag names).
-9. For benchmark numbers (e.g., 11.9x, 125.7s → 10.6s): cite only numbers that appear explicitly in [WEB_DATA]. Do not round, interpolate, or extrapolate values. If a number is not in the source, omit it or use a range (e.g., "8x–12x faster").
-10. If [WEB_DATA] content appears noisy, truncated, or HTML-heavy (e.g., contains navigation menus, cookie notices, or repeated boilerplate), extract only the article body paragraphs. If you cannot confidently identify what the source claims about a specific technical detail, omit that detail rather than guessing.`;
+9. For CLI flag names (e.g., --checkers, --build), package names (e.g., @typescript/typescript6), installation commands, and hyperlinks/URLs: copy them VERBATIM from [WEB_DATA]. Never paraphrase, rename, or invent them. If the exact name or URL is not explicitly present in [WEB_DATA], DO NOT include it — use general phrasing instead (e.g., "via experimental parallelism flags" instead of inventing flag names).
+10. For benchmark numbers (e.g., 11.9x, 125.7s → 10.6s): cite only numbers that appear explicitly in [WEB_DATA]. Do not round, interpolate, or extrapolate values. If a number is not in the source, omit it or use a range (e.g., "8x–12x faster").
+11. If [WEB_DATA] content appears noisy, truncated, or HTML-heavy (e.g., contains navigation menus, cookie notices, or repeated boilerplate), extract only the article body paragraphs. If you cannot confidently identify what the source claims about a specific technical detail, omit that detail rather than guessing.`;
 
     // [WEB_DATA] is placed FIRST in the user prompt to signal highest priority to the model.
-    let userPrompt = `Topic:\n"${state.initialCommand}"\n\n`;
+    let userPrompt = `Topic:\n"${effectiveCommand}"\n\n`;
     if (webData) {
       userPrompt += `[WEB_DATA] (live content fetched from URLs in the command — treat as absolute ground truth, prioritize over all other sources):\n${webData}\n\n`;
     }
