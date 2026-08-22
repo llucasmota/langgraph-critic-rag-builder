@@ -1,11 +1,12 @@
 import type { Runtime } from '@langchain/langgraph';
-import { OpenRouterService } from '../../services/openrouterService.ts';
+import type { ILlmService } from '../../services/llmService.ts';
 import type { GraphState } from '../graph.ts';
 import { OrchestratorOutputSchema } from './schemas.ts';
 
-export function createOrchestratorNode(llmClient: OpenRouterService) {
+export function createOrchestratorNode(llmClient: ILlmService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
-    console.log(`\n[Orchestrator] Analyzing: "${state.initialCommand}"`);
+    const effectiveCommand = state.optimizedCommand || state.initialCommand;
+    console.log(`\n[Orchestrator] Analyzing: "${effectiveCommand}"`);
 
     const systemPrompt = `You are a Technical Dispatcher for an automated LinkedIn content creation system. Classify the user's command into one of the following niches:
 - "flutter_dart": For mobile app development, Flutter framework, and Dart language topics.
@@ -15,7 +16,7 @@ export function createOrchestratorNode(llmClient: OpenRouterService) {
 
 Focus on the core technical and architectural intent of the user's command.
 Also, create a very short, succinct folder name (slug) in lowercase with hyphens representing the topic, limited to a maximum of 20 characters (e.g. 'flutter-shimmer', 'next-auth', 'langgraph-ai').`;
-    const userPrompt = `Classify this request:\n\n"${state.initialCommand}"`;
+    const userPrompt = `Classify this request:\n\n"${effectiveCommand}"`;
 
     const result = await llmClient.generateStructured(systemPrompt, userPrompt, OrchestratorOutputSchema);
 

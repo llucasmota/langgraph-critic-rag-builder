@@ -14,7 +14,7 @@ To protect accounts from algorithmic penalties and shadowbans typical of direct 
 
 ## 🗺️ Architectural Workflow State Machine
 
-The workflow uses a cyclic state machine built on `@langchain/langgraph`. It ensures that a draft is never finalized until it has passed strict factual and syntactic validation.
+The workflow uses a cyclic state machine built on `@langchain/langgraph`. It ensures that every user command is pre-flight validated, classified, grounded via live web extraction & vector databases (RAG), drafted by domain specialists, and fact-checked by a reviewer before producing visual assets.
 
 ```mermaid
 graph TD
@@ -24,7 +24,8 @@ graph TD
     classDef decStyle fill:#ffeeba,stroke:#856404,stroke-width:1.5px,color:#000;
     classDef errorStyle fill:#f8d7da,stroke:#721c24,stroke-width:1.5px,color:#721c24;
 
-    Start([User Request]) --> Orchestrator[1. Orchestrator Node]
+    Start([User Request]) --> PromptOptimizer[1. Prompt Optimizer Node]
+    PromptOptimizer --> Orchestrator[2. Orchestrator Node]
     Orchestrator --> Classification{Niche Classification}
     
     %% Niche Routing
@@ -32,13 +33,13 @@ graph TD
     OutOfScope --> End([Done])
     class OutOfScope errorStyle;
     
-    Classification -- flutter_dart --> FlutterAgent[2. Flutter Specialist]
-    Classification -- node_react --> NodeReactAgent[2. Node/React Specialist]
-    Classification -- ai_engineering --> AIAgent[2. AI Specialist]
-    class FlutterAgent,NodeReactAgent,AIAgent nodeStyle;
+    Classification -- flutter_dart --> FlutterAgent[3. Flutter Specialist]
+    Classification -- node_react --> NodeReactAgent[3. Node/React Specialist]
+    Classification -- ai_engineering --> AIAgent[3. AI Specialist]
+    class PromptOptimizer,FlutterAgent,NodeReactAgent,AIAgent nodeStyle;
 
     %% Specialists to Reviewer
-    FlutterAgent --> Reviewer[3. Reviewer Fact-Checker]
+    FlutterAgent --> Reviewer[4. Reviewer Fact-Checker]
     NodeReactAgent --> Reviewer
     AIAgent --> Reviewer
     class Reviewer nodeStyle;
@@ -47,14 +48,14 @@ graph TD
     Reviewer --> ReviewDecision{Is Approved?}
     class ReviewDecision decStyle;
     
-    ReviewDecision -- No (reviewCount < 3) --> IterativeRAG[4. Pinecone Iterative RAG Node]
+    ReviewDecision -- No (reviewCount < 3) --> IterativeRAG[5. Pinecone Iterative RAG Node]
     IterativeRAG --> |Update State Context| Classification
     class IterativeRAG nodeStyle;
 
-    ReviewDecision -- Yes or reviewCount >= 3 (Max Limit) --> ImageExtractor[5. Image Extractor Node]
+    ReviewDecision -- Yes or reviewCount >= 3 (Max Limit) --> ImageExtractor[6. Image Extractor Node]
     class ImageExtractor nodeStyle;
 
-    ImageExtractor --> Compilation[6. Compilation & Assets Output]
+    ImageExtractor --> Compilation[7. Compilation & Assets Output]
     Compilation --> End
 ```
 
@@ -62,30 +63,37 @@ graph TD
 
 ## 🛠️ Deep Dive: The Multi-Agent Pipeline
 
-### 1. The Dispatcher (Orchestrator)
-* **Goal**: Analyze the user prompt and classify it into a technical domain (`flutter_dart`, `node_react`, or `ai_engineering`).
-* **Interception**: If the request is unrelated (e.g. food recipes, off-topic chats), the Orchestrator classifies it as `out_of_scope`, gracefully aborting the execution and writing a detailed explanation to `output/<slug>/error_report.txt`.
-* **Smart Folder Naming**: The Orchestrator generates a succinct folder slug (max 20 characters, e.g., `flutter-shimmer`) based on the topic, optimizing directory structure and preventing operating system filesystem path length issues (`ENAMETOOLONG`).
+### 1. Pre-flight Prompt Optimizer & Validator (`promptOptimizerNode`)
+* **Goal**: Inspects, sanitizes, and refines incoming raw user prompts before dispatching to the graph.
+* **Contradiction Resolution**: Detects and fixes cross-ecosystem contradictions (e.g., requesting a Flutter/Dart post with a "TypeScript snippet" format).
+* **Noise & Deduplication**: Cleans glued text, redundant priority bullet points, and converts negative prohibitions (*"Do NOT write Python"*) into explicit positive constraints (*"Language: Strictly Dart"*).
+* **Anti-Hallucination Guardrails**: Enforces source-grounding rules and preserves placeholders (`[CODE_SNIPPET_X]`), URLs, and length bounds.
+* **Scope Preservation**: Leaves out-of-scope/casual requests intact so the Orchestrator can handle them properly.
 
-### 2. Specialized Content Creation (The Engineers)
-Each specialist agent is configured with domain-specific developer personas and strict rules:
+### 2. The Dispatcher (Orchestrator)
+* **Goal**: Analyze the optimized prompt and classify it into a technical domain (`flutter_dart`, `node_react`, or `ai_engineering`).
+* **Interception**: If the request is unrelated (e.g. food recipes, off-topic chats), the Orchestrator classifies it as `out_of_scope`, gracefully aborting the execution and writing a detailed explanation to `output/<slug>/error_report.txt`.
+* **Smart Folder Naming**: Generates a succinct folder slug (max 20 characters, e.g., `flutter-shimmer`) based on the topic, optimizing directory structure and preventing OS path length issues (`ENAMETOOLONG`).
+
+### 3. Specialized Content Creation (The Engineers)
+Each specialist agent is configured with domain-specific developer personas, live URL extraction (`webContentService`), and vector retrieval (Pinecone):
 * **Flutter/Dart Specialist**: Focuses on design patterns, widgets, under-the-hood engine rendering, and clean Dart code.
 * **NodeJS/React Specialist**: Tailored for full-stack JavaScript/TypeScript architectures, performance optimization, concurrency, and Event Loop internals.
 * **AI Specialist**: Directed toward LLMs, RAG system design, vector stores, and multi-agent frameworks (e.g., LangGraph).
 
-### 3. Strict Critic-Guided Review Loop (The Auditor)
+### 4. Strict Critic-Guided Review Loop (The Auditor)
 A specialized **Technical Fact-Checker** reviews every generated post. It enforces:
-* **Factual Accuracy**: Refuses fabricated framework versions (e.g., claiming a feature was introduced in `Flutter 3.4` instead of `3.10`).
+* **Factual Accuracy**: Refuses fabricated framework versions or imaginary APIs.
 * **Code Soundness**: Rejects code snippets containing placeholders like `child: ...` or ellipses (`// ... perform logic`), demanding self-contained, compilable code.
-* **Format Compliance**: Strips inline markdown code blocks and registers them for image rendering instead, outputting clean, readable social media copy.
+* **Surgical Corrections**: Produces structured corrections (`originalText`, `issue`, `suggestedReplacement`) while preserving verified text sections.
 
-### 4. Dynamic Iterative RAG (Critic-Guided Retrieval)
+### 5. Dynamic Iterative RAG (Critic-Guided Retrieval)
 Unlike static RAG systems that query the database only once, this workflow implements **Iterative Retrieval-Augmented Generation**:
-1. If the Reviewer rejects a post, it outputs a precise search query (e.g., `flutter 3.7 desktop mediaquery resize changelog`) alongside its descriptive critique.
-2. The graph routes back to the Specialist, but first triggers a **secondary, targeted query to Pinecone**.
-3. The new documentation is merged into the prompt, grounding the Specialist with the correct technical facts to resolve the reviewer's feedback.
+1. If the Reviewer rejects a post, it outputs a targeted search query alongside its critique.
+2. The graph routes back to the Specialist with a **secondary, targeted query to Pinecone**.
+3. The new documentation is merged into the prompt, grounding the Specialist with the correct technical facts.
 
-### 5. Automated Visual Asset Processing
+### 6. Automated Visual Asset Processing
 The system automatically parses all valid code snippets generated by the Specialist and renders them into high-quality syntax-highlighted PNG images using the **Carbonara API** (modeled after Carbon.now.sh). 
 
 ---
@@ -145,7 +153,7 @@ npm install
 ```
 
 ### Run Tests
-The repository features automated unit tests covering the orchestrator node classification, out-of-scope interception, and reviewer state routing:
+The repository features automated unit tests covering pre-flight prompt optimization, orchestrator node classification, out-of-scope interception, and reviewer state routing:
 ```bash
 npm test
 ```

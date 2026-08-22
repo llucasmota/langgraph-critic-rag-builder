@@ -3,13 +3,14 @@ import { config, type ModelConfig } from '../config.ts';
 import { SystemMessage, HumanMessage } from '@langchain/core/messages';
 import type { z } from 'zod/v3';
 import { createAgent, providerStrategy } from 'langchain';
+import type { ILlmService, LLMStructuredResult } from './llmService.ts';
 
 export type LLMResponse = {
   model: string;
   content: string;
 };
 
-export class OpenRouterService {
+export class OpenRouterService implements ILlmService {
   private llmClient: ChatOpenAI;
   private config: ModelConfig;
 
@@ -39,7 +40,7 @@ export class OpenRouterService {
     systemPrompt: string,
     userPrompt: string,
     schema: z.ZodSchema<T>,
-  ) {
+  ): Promise<LLMStructuredResult<T>> {
     try {
       const agent = createAgent({
         model: this.llmClient,
