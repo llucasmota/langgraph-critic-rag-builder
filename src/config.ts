@@ -23,11 +23,11 @@ export type ModelConfig = {
 console.assert(process.env.OPENROUTER_API_KEY, 'OPENROUTER_API_KEY is not set in environment variables');
 
 export const prompts = {
-  aiEngineer: readFileSync('./prompts/v1/aiEngineer.txt'),
-  nodeJsReact: readFileSync('./prompts/v1/nodeJsReact.txt'),
-  orchestrator: readFileSync('./prompts/v1/orchestrator.txt'),
-  promptOptimizer: readFileSync('./prompts/v1/promptOptimizer.txt'),
-  reviewer: readFileSync('./prompts/v1/reviewer.txt'),
+  aiEngineer: readFileSync('./prompts/v1/aiEngineer.txt', 'utf-8'),
+  nodeJsReact: readFileSync('./prompts/v1/nodeJsReact.txt', 'utf-8'),
+  orchestrator: readFileSync('./prompts/v1/orchestrator.txt', 'utf-8'),
+  promptOptimizer: readFileSync('./prompts/v1/promptOptimizer.txt', 'utf-8'),
+  reviewer: readFileSync('./prompts/v1/reviewer.txt', 'utf-8'),
 }
 
 export const config: ModelConfig = {
