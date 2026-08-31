@@ -21,16 +21,31 @@ export function createReviewerNode(llmClient: ILlmService) {
     const systemPrompt = prompts.reviewer;
 
     const today = new Date().toISOString().split('T')[0]; // e.g. "2026-07-14"
+    const effectiveCommand = state.optimizedCommand || state.initialCommand;
     let userPrompt = `CONTEXT FOR THIS REVIEW:
 Today's date is ${today}. The specialist may have written about topics that are more recent than your training data cutoff. This is expected and valid.
 If [WEB_DATA] is provided below and confirms the facts in the draft, treat those facts as VERIFIED — do not reject them solely because they postdate your knowledge cutoff.
 Your job is to check that the draft accurately reflects what [WEB_DATA] says, not to question whether [WEB_DATA] itself is real.
 
 ---
+USER COMMAND & CONSTRAINTS:
+"""
+${effectiveCommand}
+"""
 
-Review this draft:\n\n${state.technicalDraft}`;
+---
+DRAFT TO REVIEW:
+${state.technicalDraft}`;
+
+    if (state.codeSnippets && state.codeSnippets.length > 0) {
+      userPrompt += `\n\n---
+CODE SNIPPETS PRODUCED BY SPECIALIST (check syntax & user language compliance):
+${state.codeSnippets.map((s, i) => `[Snippet ${i + 1}]:\n${s}`).join('\n\n')}`;
+    }
+
     if (state.webData) {
-      userPrompt += `\n\n[WEB_DATA] (live source fetched from the user's URL — use as ground truth for fact-checking):\n${state.webData.substring(0, 6_000)}`;
+      userPrompt += `\n\n---
+[WEB_DATA] (live source fetched from the user's URL — use as ground truth for fact-checking):\n${state.webData.substring(0, 6_000)}`;
     }
     const result = await llmClient.generateStructured(systemPrompt, userPrompt, ReviewerOutputSchema);
 

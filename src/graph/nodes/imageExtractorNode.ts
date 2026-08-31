@@ -16,10 +16,11 @@ function slugify(text: string): string {
 
 function getExtension(niche?: string, code?: string): string {
   if (niche === 'flutter_dart') return 'dart';
-  if (niche === 'ai_engineering') {
-    if (code && (code.includes('import ') || code.includes('def ') || code.includes('print(')) && !code.includes('console.log')) {
-      return 'py';
-    }
+  if (niche === 'ai_engineering' && code) {
+    const isPython = /\b(def|elif|from\s+[\w.]+\s+import|lambda|print\(|None|True|False)\b/.test(code) || /:\s*$/.test(code);
+    const isTypeScript = /\b(const|let|var|interface|type|export|import\s+type|console\.\w+)\b/.test(code) || /from\s+['"]@?[\w./-]+['"]/.test(code);
+
+    if (isPython && !isTypeScript) return 'py';
     return 'ts';
   }
   return 'ts';
