@@ -48,7 +48,7 @@ export function createAiNode(llmClient: ILlmService) {
 
     let userPrompt = `Topic:\n"${effectiveCommand}"\n\n`;
     if (webData) {
-      userPrompt += `[WEB_DATA] (live content fetched from URLs in the command — treat as absolute ground truth, prioritize over all other sources):\n${webData}\n\n`;
+      userPrompt += `[WEB_DATA] (live content fetched from URLs in the command — treat as ground truth for facts/concepts, but adapt all code snippets and explanations to the target programming language requested in the Topic):\n${webData}\n\n`;
     }
     if (ragContext) userPrompt += `[RAG Data]:\n${ragContext}\n\n`;
     if (state.mcpContext) userPrompt += `[MCP Data]:\n${state.mcpContext}\n\n`;
